@@ -145,6 +145,25 @@ with DuplexEngine(capture_channels=4, selected_channel=0) as engine:
 適用した後に選べます。適用前の指定は `RuntimeError` になります。固定 FIR は出力に
 5 ms の遅れを加え、処理した block をその都度渡します。
 
+話者の位置から届く音を保つには、その位置で呼び出し側が掃引音を鳴らす間に、
+同じ engine の `measure_talker_response()` で録音します。録音には部屋の雑音だけの
+時間も含めてください。測定中、duplex-audio の再生出力は無音になります。
+
+```python
+measurement = engine.measure_talker_response(duration_seconds=10.0, timeout=15.0)
+if measurement.status != "success":
+    raise RuntimeError(measurement.error or measurement.status)
+measurement.talker_response.save("talker.json")
+engine.set_talker_response(measurement.talker_response)
+```
+
+測定はスピーカーの calibration の前でもできます。設定はスピーカーの calibration を
+適用した後に行い、次の処理 block から `"beamform"` にだけ効きます。
+後の起動では `TalkerResponse.load("talker.json")` (`duplex_audio` から import) で
+読み込み、同じ ch 数と AEC sample rate の engine に設定できます。
+`set_talker_response(None)` はスピーカーの伝わり方だけから作る重みに戻します。
+スピーカーの calibration を適用し直しても、設定した話者の伝わり方は保たれます。
+
 `CleanFrame` は、音、通し番号、sample の位置、その音を作った出し方、スピーカーとの
 一致の値を持ちます。一致の値は直近 512 sample (16 kHz で 32 ms) の録音の観測であり、
 AEC / NS の前の音から、出し方によらず計算されます。`speaker_match_status` は `ok`、
