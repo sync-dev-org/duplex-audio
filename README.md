@@ -112,6 +112,50 @@ context manager は録音・再生を開始し、終了時に停止します。
 terminal になった generation を `release_playback_generation()` で解放します。
 `stream_health` と `get_pipeline_stats()` は stream の稼働状態と処理の統計を返します。
 
+## 複数のマイク
+
+`capture_channels` で録音する ch 数を指定できます。再生は 1ch のままです。
+既定の `microphone_mix="selected"` は、`selected_channel` (0 始まり、既定 0) の音を
+1 本だけ選びます。`"sum"` は全 ch の和を返します。各 ch は、それぞれ 16 kHz に
+変換されてから混ぜられます。
+
+スピーカーを抑える固定の重みを使うには、稼働中の stream で calibration を測り、
+全 ch の結果を明示して適用します。測定中は掃引音がスピーカーから再生されます。
+
+```python
+with DuplexEngine(capture_channels=4, selected_channel=0) as engine:
+    result = engine.measure_calibration()
+    if result.status != "success":
+        raise RuntimeError(result.error or result.status)
+    engine.apply_calibration(
+        result.profile.bulk_delay,
+        expected_stream_generation=result.stream_generation,
+        channel_responses=result.channel_responses,
+    )
+    engine.set_microphone_mix("beamform")
+    frame = engine.read_clean_frame(timeout=0.1)
+    if frame is not None:
+        print(frame.sample_offset, frame.microphone_mix,
+              frame.speaker_match, frame.speaker_match_status)
+        clean = frame.samples
+```
+
+`set_microphone_mix()` は処理を止めずに三つの出し方を切り替えます。切り替えは次の
+処理 block から効き、AEC の状態をリセットします。`"beamform"` は複数 ch の結果を
+適用した後に選べます。適用前の指定は `RuntimeError` になります。固定 FIR は出力に
+5 ms の遅れを加え、処理した block をその都度渡します。
+
+`CleanFrame` は、音、通し番号、sample の位置、その音を作った出し方、スピーカーとの
+一致の値を持ちます。一致の値は直近 512 sample (16 kHz で 32 ms) の録音の観測であり、
+AEC / NS の前の音から、出し方によらず計算されます。`speaker_match_status` は `ok`、
+部屋の雑音の基準に対して小さい `quiet`、未適用の `uncalibrated`、1ch の構成の
+`single_channel` を区別します。`ok` 以外では `speaker_match` は `None` です。
+
+`read_clean()` と `read_clean_frame()` は同じ queue から一つずつ取り出します。
+queue に残る古い block には、その block を作った時の出し方と値が付いています。
+`read_capture_zero_run()` は全 ch が 0 ちょうどの長さを返し、
+`read_capture_channel_zero_runs()` は ch の順に同じ観測を返します。
+
 ## License
 
 duplex-audio の license は MIT です。
