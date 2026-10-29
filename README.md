@@ -186,13 +186,24 @@ AEC / NS の前の音から、出し方によらず計算されます。`speaker
 部屋の雑音の基準に対して小さい `quiet`、未適用の `uncalibrated`、1ch の構成の
 `single_channel` を区別します。`ok` 以外では `speaker_match` は `None` です。
 
-`talker_match` は、設定した `TalkerResponse` と録音の組の近さを 500 Hz〜4 kHz で計算した
+`talker_match` は、設定した `TalkerResponse` と録音の組の近さを、既定では 500 Hz〜4 kHz で計算した
 0.0 以上 1.0 以下の値です。1.0 に近いほど話者の位置の伝わり方に近いことを表します。
 `talker_match_status` は `ok`、スピーカーとの一致の値と同じ雑音の基準での `quiet`、
 話者の位置を設定していない `unmeasured`、1ch の構成の `single_channel` を区別します。
 スピーカーの calibration の適用前も `unmeasured` です。`ok` 以外では値は `None` です。
 `set_talker_response()` は、出し方によらず次の処理 block から判定する位置を替えます。
 `set_talker_response(None)` は話者の位置との一致の値を `unmeasured` に戻します。
+
+`engine.set_talker_match_band(low_hz, high_hz)` は、この値を計算する周波数の帯を
+処理を止めずに次の処理 block から替えます。読み取りだけの property
+`engine.talker_match_band` は、設定した `(low_hz, high_hz)` を返します。既定は
+`(500.0, 4000.0)` です。帯の両端を含み、端の値は有限な `int` または `float`
+(`bool` を除く) で、`0 <= low_hz < high_hz <= engine.aec_sample_rate / 2` を満たし、
+512 点の FFT の bin を一つ以上含む必要があります。型が違う時は `TypeError`、
+値が条件を満たさない時は `ValueError` となり、設定は変わりません。AEC が 16 kHz
+なら上の端は 8 kHz まで選べます。測った話者の伝わり方が 0 の bin は計算から除きます。
+calibration の前と 1ch の構成でも設定でき、スピーカーの calibration を適用し直しても
+帯は保たれます。この設定は音と `speaker_match` を変えず、AEC を reset しません。
 
 `read_clean()` と `read_clean_frame()` は同じ queue から一つずつ取り出します。
 queue に残る古い block には、その block を作った時の出し方と値が付いています。
