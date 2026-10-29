@@ -158,17 +158,25 @@ engine.set_talker_response(measurement.talker_response)
 ```
 
 測定はスピーカーの calibration の前でもできます。設定はスピーカーの calibration を
-適用した後に行い、次の処理 block から `"beamform"` にだけ効きます。
+適用した後に行い、次の処理 block から `"beamform"` の重みと話者の位置との一致の値に効きます。
 後の起動では `TalkerResponse.load("talker.json")` (`duplex_audio` から import) で
 読み込み、同じ ch 数と AEC sample rate の engine に設定できます。
 `set_talker_response(None)` はスピーカーの伝わり方だけから作る重みに戻します。
 スピーカーの calibration を適用し直しても、設定した話者の伝わり方は保たれます。
 
-`CleanFrame` は、音、通し番号、sample の位置、その音を作った出し方、スピーカーとの
+`CleanFrame` は、音、通し番号、sample の位置、その音を作った出し方、スピーカーと話者の位置との
 一致の値を持ちます。一致の値は直近 512 sample (16 kHz で 32 ms) の録音の観測であり、
 AEC / NS の前の音から、出し方によらず計算されます。`speaker_match_status` は `ok`、
 部屋の雑音の基準に対して小さい `quiet`、未適用の `uncalibrated`、1ch の構成の
 `single_channel` を区別します。`ok` 以外では `speaker_match` は `None` です。
+
+`talker_match` は、設定した `TalkerResponse` と録音の組の近さを 500 Hz〜4 kHz で計算した
+0.0 以上 1.0 以下の値です。1.0 に近いほど話者の位置の伝わり方に近いことを表します。
+`talker_match_status` は `ok`、スピーカーとの一致の値と同じ雑音の基準での `quiet`、
+話者の位置を設定していない `unmeasured`、1ch の構成の `single_channel` を区別します。
+スピーカーの calibration の適用前も `unmeasured` です。`ok` 以外では値は `None` です。
+`set_talker_response()` は、出し方によらず次の処理 block から判定する位置を替えます。
+`set_talker_response(None)` は話者の位置との一致の値を `unmeasured` に戻します。
 
 `read_clean()` と `read_clean_frame()` は同じ queue から一つずつ取り出します。
 queue に残る古い block には、その block を作った時の出し方と値が付いています。
