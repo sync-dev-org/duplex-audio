@@ -164,6 +164,22 @@ engine.set_talker_response(measurement.talker_response)
 `set_talker_response(None)` はスピーカーの伝わり方だけから作る重みに戻します。
 スピーカーの calibration を適用し直しても、設定した話者の伝わり方は保たれます。
 
+下げたい雑音の位置でも `measure_talker_response()` で一か所ずつ測定し、同じ
+`TalkerResponse` として保存・読み込みできます。使う位置だけを tuple で渡すと、
+話者の位置の音を保つ重みに、その位置から届く音を下げる条件を加えます。
+
+```python
+engine.set_talker_response(talker, noise_positions=(noise1, noise2))
+engine.set_talker_response(talker, noise_positions=(noise1,))  # 2 番目の位置を使わない
+engine.set_talker_response(talker, noise_positions=())       # どの位置も使わない (既定)
+```
+
+切り替えは処理を止めずに次の block から効きます。各位置の共分散は、周波数ごとに
+スピーカーの共分散の trace と同じ大きさに揃えて加えます。空の tuple は従来の
+話者の位置とスピーカーだけの重みに戻します。`None` と空でない `noise_positions` の
+組は `ValueError` になります。各測定の ch 数と sample rate は engine と揃えてください。
+スピーカーの calibration を適用し直しても、設定した雑音の位置は保たれます。
+
 `CleanFrame` は、音、通し番号、sample の位置、その音を作った出し方、スピーカーと話者の位置との
 一致の値を持ちます。一致の値は直近 512 sample (16 kHz で 32 ms) の録音の観測であり、
 AEC / NS の前の音から、出し方によらず計算されます。`speaker_match_status` は `ok`、
