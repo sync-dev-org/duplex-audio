@@ -154,31 +154,51 @@ measurement = engine.measure_talker_response(duration_seconds=10.0, timeout=15.0
 if measurement.status != "success":
     raise RuntimeError(measurement.error or measurement.status)
 measurement.talker_response.save("talker.json")
-engine.set_talker_response(measurement.talker_response)
+from duplex_audio import BeamPosition
+
+engine.set_beam_positions((
+    BeamPosition("keep", measurement.talker_response, "talker"),
+    BeamPosition("drop", "speaker", "TV"),
+))
 ```
 
 測定はスピーカーの calibration の前でもできます。設定はスピーカーの calibration を
-適用した後に行い、次の処理 block から `"beamform"` の重みと話者の位置との一致の値に効きます。
+適用した後に行い、次の処理 block から `"beamform"` の重みと位置ごとの一致の値に効きます。
 後の起動では `TalkerResponse.load("talker.json")` (`duplex_audio` から import) で
 読み込み、同じ ch 数と AEC sample rate の engine に設定できます。
-`set_talker_response(None)` はスピーカーの伝わり方だけから作る重みに戻します。
-スピーカーの calibration を適用し直しても、設定した話者の伝わり方は保たれます。
+`set_beam_positions(())` はスピーカーの伝わり方だけから作る重みに戻します。
+スピーカーの calibration を適用し直しても、位置の一覧は保たれ、`"speaker"` の
+伝わり方は新しい calibration の物に替わります。
 
 下げたい雑音の位置でも `measure_talker_response()` で一か所ずつ測定し、同じ
-`TalkerResponse` として保存・読み込みできます。使う位置だけを tuple で渡すと、
-話者の位置の音を保つ重みに、その位置から届く音を下げる条件を加えます。
+`TalkerResponse` として保存・読み込みできます。各位置に `"keep"` (残す) または
+`"drop"` (下げる) を指定し、tuple で渡します。次の例は、話者と試験スピーカーの
+二つの位置の音を保ち、calibration で測った TV の音を下げます。
 
 ```python
-engine.set_talker_response(talker, noise_positions=(noise1, noise2))
-engine.set_talker_response(talker, noise_positions=(noise1,))  # 2 番目の位置を使わない
-engine.set_talker_response(talker, noise_positions=())       # どの位置も使わない (既定)
+engine.set_beam_positions((
+    BeamPosition("keep", talker, "talker"),
+    BeamPosition("drop", "speaker", "TV"),
+    BeamPosition("keep", test_speaker, "test"),
+))
 ```
 
-切り替えは処理を止めずに次の block から効きます。各位置の共分散は、周波数ごとに
-スピーカーの共分散の trace と同じ大きさに揃えて加えます。空の tuple は従来の
-話者の位置とスピーカーだけの重みに戻します。`None` と空でない `noise_positions` の
-組は `ValueError` になります。各測定の ch 数と sample rate は engine と揃えてください。
-スピーカーの calibration を適用し直しても、設定した雑音の位置は保たれます。
+一覧の位置の数の上限は `capture_channels` です。各測定の ch 数と sample rate は
+engine と揃えてください。`name` は呼び出し側の識別用で、処理には使いません。
+読み取り専用の `engine.beam_positions` は次の block から効く一覧を返します。
+設定の呼び出し側は重みの構築が終わるまで待ちます。その間も音声の処理は前の重みで続き、
+構築が終わった重みを次の block から使います。測った drop の位置の共分散は、
+スピーカーの強さに合わせて足します。keep がある一覧から `"speaker"` を外すと、
+スピーカーを下げるための共分散も外れます。keep が無い時は、空の一覧を含め、
+スピーカーの伝わり方だけから作る重みを使います。既定の一覧は
+`(BeamPosition("drop", "speaker"),)` です。
+
+`engine.set_excluded_channels((2,))` は指定したマイクの ch を処理から外し、空の tuple
+で全 ch に戻します。選んだ ch が外れると、残った最小の番号の ch を選び直します。
+`engine.effective_selected_channel` はその番号を返します。一覧の位置の数よりマイクが
+少なくなった時は、一覧の末尾から位置を重みから外し、`engine.omitted_position_indices`
+にその位置の番号を返します。位置の近さは外した位置も計算します。残りが 1ch の時は
+どの出し方でもその ch の音を返します。全 ch を外す指定は拒みます。
 
 `CleanFrame` は、音、通し番号、sample の位置、その音を作った出し方、スピーカーと話者の位置との
 一致の値を持ちます。一致の値は直近 512 sample (16 kHz で 32 ms) の録音の観測であり、
@@ -186,15 +206,20 @@ AEC / NS の前の音から、出し方によらず計算されます。`speaker
 部屋の雑音の基準に対して小さい `quiet`、未適用の `uncalibrated`、1ch の構成の
 `single_channel` を区別します。`ok` 以外では `speaker_match` は `None` です。
 
-`talker_match` は、設定した `TalkerResponse` と録音の組の近さを、既定では 500 Hz〜4 kHz で計算した
-0.0 以上 1.0 以下の値です。1.0 に近いほど話者の位置の伝わり方に近いことを表します。
-`talker_match_status` は `ok`、スピーカーとの一致の値と同じ雑音の基準での `quiet`、
-話者の位置を設定していない `unmeasured`、1ch の構成の `single_channel` を区別します。
-スピーカーの calibration の適用前も `unmeasured` です。`ok` 以外では値は `None` です。
-`set_talker_response()` は、出し方によらず次の処理 block から判定する位置を替えます。
-`set_talker_response(None)` は話者の位置との一致の値を `unmeasured` に戻します。
+`position_matches` と `position_match_statuses` は、一覧と同じ順の位置ごとの近さと状態です。
+`position_names` は、その block を計算した時点の一覧の名前を同じ順に持ちます。三つの
+tuple の長さは同じです。一覧を替える前の frame が読み出しを待っている時も、その
+frame は元の名前を持つため、読み出した値には現在の一覧でなく `position_names` を使います。
+名前が `None` の位置はそのまま `None` になります。
+近さは 0.0 以上 1.0 以下で、1.0 に近いほど測った伝わり方に近いことを表します。
+`talker_match` は keep の位置の近さの最大値です。重みから外した keep も、残りの ch で
+計算できれば最大値に含めます。`talker_match_status` は値がある `ok`、keep が無い
+`unmeasured`、keep があっても残りが 1ch の `single_channel`、有効な値が無い `quiet`
+を区別し、`ok` 以外では値は `None` です。位置ごとの近さは、calibration の適用前は
+`unmeasured`、残りが 1ch なら `single_channel`、音が雑音の基準より小さい時は `quiet`
+となり、値は `None` です。
 
-`engine.set_talker_match_band(low_hz, high_hz)` は、この値を計算する周波数の帯を
+`engine.set_talker_match_band(low_hz, high_hz)` は、一覧の全位置の近さを計算する周波数の帯を
 処理を止めずに次の処理 block から替えます。読み取りだけの property
 `engine.talker_match_band` は、設定した `(low_hz, high_hz)` を返します。既定は
 `(500.0, 4000.0)` です。帯の両端を含み、端の値は有限な `int` または `float`
